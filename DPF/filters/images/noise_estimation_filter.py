@@ -44,7 +44,7 @@ class NoiseEstimationFilter(ImageFilter):
 
     @property
     def result_columns(self) -> list[str]:
-        return ["estimated_noise_level"]
+        return ["estimated_noise_level", "noise_filter_pass"]
 
     @property
     def dataloader_kwargs(self) -> dict[str, Any]:
@@ -68,17 +68,23 @@ class NoiseEstimationFilter(ImageFilter):
 
         for key, image in batch:
             try:
-                image = np.array(image)
-                cropped_image = self.crop_image(image)
-                features = self.extract_features(cropped_image)
-                noise_level = self.model.predict([features])[0]
+                noise_level = self.process_image(image)
                 df_batch_labels["estimated_noise_level"].append(noise_level)
+                df_batch_labels["noise_filter_pass"].append(noise_level<1.0)
             except Exception as e:
                 print(f"Error processing image: {str(e)}")
                 df_batch_labels["estimated_noise_level"].append(None)
+                df_batch_labels["noise_filter_pass"].append(False)
             df_batch_labels[self.key_column].append(key)
 
         return df_batch_labels
+    
+    def process_image(self, image):
+        image = np.array(image)
+        cropped_image = self.crop_image(image)
+        features = self.extract_features(cropped_image)
+        noise_level = self.model.predict([features])[0]
+        return noise_level
 
     def crop_image(self, image):
         target_size = self.params['target_size']

@@ -40,7 +40,7 @@ class GrayscaleFilter(ImageFilter):
 
     @property
     def result_columns(self) -> list[str]:
-        return ["is_grayscale"]
+        return ["grayscale_pass"]
 
     @property
     def dataloader_kwargs(self) -> dict[str, Any]:
@@ -65,16 +65,17 @@ class GrayscaleFilter(ImageFilter):
         for key, image in batch:
             try:
                 image = np.array(image)
-                result = self.is_grayscale(image)
-                df_batch_labels["is_grayscale"].append(result)
+                result = self.process_image(image)
+                df_batch_labels["grayscale_pass"].append(not result)
             except Exception as e:
                 print(f"Error processing image: {str(e)}")
-                df_batch_labels["is_grayscale"].append(None)
+                df_batch_labels["grayscale_pass"].append(False)
             df_batch_labels[self.key_column].append(key)
 
         return df_batch_labels
 
-    def is_grayscale(self, image):
+
+    def process_image(self, image):
         """
         Detects if an image is grayscale (black and white) or not.
         

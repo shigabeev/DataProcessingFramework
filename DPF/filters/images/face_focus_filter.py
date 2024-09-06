@@ -46,7 +46,7 @@ class FaceFocusFilter(ImageFilter):
 
     @property
     def result_columns(self) -> list[str]:
-        return ["face_focus_measure", "bg_focus_measure", "bbox", "faces_count", "confidence", "face_pass"]
+        return ["face_focus_measure", "bg_focus_measure", "bbox", "faces_count", "confidence", "face_focus_pass", 'focus_pass']
     
     @property
     def dataloader_kwargs(self) -> dict[str, Any]:
@@ -83,14 +83,16 @@ class FaceFocusFilter(ImageFilter):
                 df_batch_labels["bbox"].append(info["bbox"])
                 df_batch_labels["faces_count"].append(info["faces_count"])
                 df_batch_labels["confidence"].append(info["confidence"])
-                df_batch_labels["face_pass"].append(info["face_pass"])
+                df_batch_labels["face_focus_pass"].append(info["face_focus_pass"])
+                df_batch_labels["focus_pass"].append(False)
             else:
                 df_batch_labels["face_focus_measure"].append(0)
                 df_batch_labels["bg_focus_measure"].append(0)
                 df_batch_labels["bbox"].append(False)
                 df_batch_labels["faces_count"].append(0)
                 df_batch_labels["confidence"].append(0.0)
-                df_batch_labels["face_pass"].append(False)
+                df_batch_labels["face_focus_pass"].append(False)
+                df_batch_labels["focus_pass"].append(False)
 
             df_batch_labels[self.key_column].append(key)
 
@@ -130,31 +132,35 @@ class FaceFocusFilter(ImageFilter):
         # Calculate the focus measure for the entire image
         bg_focus_measure = self.tenengrad_variance(image)
         
+        focus_pass = bg_focus_measure > self.threshold
         if not self.detect_face:
             # Check if the face is in focus
-            in_focus = bg_focus_measure > self.threshold
+            focus_pass = bg_focus_measure > self.threshold
             return {
                 "face_focus_measure": 0,
                 "bg_focus_measure": bg_focus_measure,
                 "bbox": None,
                 "faces_count": 0,
                 "confidence":0,
-                "face_pass": in_focus
+                "face_focus_pass": None,
+                "focus_pass": focus_pass
             }
 
         # Detect faces in the image
         faces = self.face_detector.predict_jsons(image)
         
-        if faces is None or len(faces) == 0:
+        # if faces not found
+        if faces is None or len(faces) == 0 or faces[0]['score'] == -1 or not faces[0]['bbox']:
             return {
                 "face_focus_measure": 0,
                 "bg_focus_measure": bg_focus_measure,
                 "bbox": None,
                 "faces_count": 0,
                 "confidence": 0,
-                "face_pass": False
+                "face_focus_pass": False,
+                "focus_pass": focus_pass
             }
-        
+
         # Get the face with the highest confidence
         face = max(faces, key=lambda x: x['score'])
         
@@ -166,6 +172,18 @@ class FaceFocusFilter(ImageFilter):
         # Extract the face region
         x1, y1, x2, y2 = map(int, bbox)
         face_region = image[y1:y2, x1:x2]
+
+        if face_region.size == 0:
+            # print(f"Warning: Empty face region detected for image")
+            return {
+                "face_focus_measure": 0,
+                "bg_focus_measure": bg_focus_measure,
+                "bbox": None,
+                "faces_count": len(faces),
+                "confidence": face["score"],
+                "face_focus_pass": False,
+                "focus_pass": focus_pass
+            }
         
         # Calculate the focus measure for the face region
         face_focus_measure = self.tenengrad_variance(face_region)
@@ -179,5 +197,6 @@ class FaceFocusFilter(ImageFilter):
             "bbox": bbox,
             "faces_count": len(faces),
             "confidence": face["score"],
-            "face_pass": (len(faces) == 1) and in_focus and face['score'] > 0.5
+            "focus_pass": focus_pass,
+            "face_focus_pass": (len(faces) == 1) and in_focus and face['score'] > 0.5
         }
